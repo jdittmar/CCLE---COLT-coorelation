@@ -1,0 +1,1 @@
+Download this data at:http://www.broadinstitute.org/ccle/data/browseData?conversationPropagation=beginThere should be 2 files in this folder:Cell line annotations:http://www.broadinstitute.org/ccle/downloadFile/DefaultSystemRoot/exp_10/ds_22/CCLE_sample_info_file_2012-10-18.txt?downloadff=true&fileId=6801One mRNA expression file:e.g. CCLE_Expression_Entrez_2012-10-18
