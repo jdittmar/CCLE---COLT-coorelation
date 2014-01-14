@@ -1,4 +1,4 @@
-CCLE---COLT-coorelation
+CCLE---COLT-correlation
 =======================
 
 
