@@ -11,7 +11,7 @@
 # every other gene for which there is data. Just set the 'geneToAnalyze'
 # the 'sourceData' (i.e. what data to use for the geneToAnalyze), and
 # the 'compareDataTo'. SourceData and CompareDataTo can be either 'CCLE' 
-# or colt, but they cannot be the same. 'pValueCutoff' can be set to the 
+# or 'COLT' or 'GEO', but they cannot be the same. 'pValueCutoff' can be set to the 
 # correlation p-value threshold you would like to outputted results to be limited to
 # 'tumorTypesToConsider' is a hash that can be used to specify the types of 
 # cell lines to consider (source tissue). If this parameter is omitted all 
@@ -25,10 +25,10 @@ use Modules::Maths;
 
 &processData( {'geneToAnalyze' => 'PLK1',
 								'sourceData' => 'colt',
-								'compareDataTo'=>'ccle',
+								'compareDataTo'=>'geo',
 								'limitToYeastData'=>0,
 								'pValueCutoff' => 1,
-								'tumorTypesToConsider' => {'BREAST' => 1}
+								# 'tumorTypesToConsider' => {'BREAST' => 1}
 							});
 
 
@@ -57,7 +57,9 @@ sub processData{
 	else{	$pValueCutoff = 0.05;}
 
 	my %datasets = ("colt" => {'sub' => \&loadColtData, "param" => 'source_data/COLT_data/GARP-score.txt'}, 
-									"ccle" => {'sub' => \&load_CCLE_data, "param" => ['source_data/CCLE_data/rma - CCLE_Expression_2012-09-29.res']}
+									# "ccle" => {'sub' => \&load_CCLE_data, "param" => ['source_data/CCLE_data/rma - CCLE_Expression_2012-09-29.res']},
+									"ccle" => {'sub' => \&load_CCLE_data, "param" => ['source_data/CCLE_data/rma_CCLE_Expression_Entrez_2012-10-18.res']}, 
+									"geo" => {'sub' => \&load_GEO_data, "param" => ['source_data/GEO_data/rma_GSE12777_NUSE.txt']}
 									);
 	# what should the drug data be compared to? options are defined in %datasets
 	
@@ -79,14 +81,14 @@ sub processData{
 	# open dataset, store data in hash --> {dataset}->{'genes'}->{geneName}->{cellLine} = score
 	# {'cellLinesToConsider'} = array of cell line names
 	my $comparisonData = $datasets{$compareDataTo}->{'sub'}->(\%cellLinesToConsider, $datasets{$compareDataTo}->{'param'});
-
+	# warn Dumper $comparisonData;
 	my $count=0;
 	my $start = 'Gene';
 	if($limitToYeastData){	$start = "Yeast Gene\tHuman Gene";}
 	$start = "$start\tSorting correlation\tSorting P-value\tActually Significant?\tSpearman Correlation\tSpearman P-value\tCorrelation\tP-Value\tCook Corrected Correlation\tP-value\tExplanation\t# cell lines\t";
 	my $numTabs = 0;
 	while ($start =~ /\t/g) { $numTabs++; }
-	warn "numTabs = $numTabs";
+	# warn "numTabs = $numTabs";
 
 	foreach my $sourceDataset(keys %{$data}){
 		foreach my $dataset(keys %{$comparisonData}){
@@ -213,7 +215,8 @@ sub loadColtData{
 	if(!($header[1] =~ /Gene/i && $header[3] eq 'DESCRIPTION' )){
 		die "Could not parse colt data file header";
 	}
-
+	# warn "cell lines to consider = ";
+	# warn Dumper $cellLinesToConsider;
 	my (@indicesToConsider)=();
 	for (my $i = 4; $i < @header; $i++) {	
 		$header[$i] = &normalizeCellLineName($header[$i]);
@@ -223,11 +226,13 @@ sub loadColtData{
 			$coltData{'colt'}->{'cellLinesToConsider'}->{$header[$i]}=1;
 		}
 		else{
+			# warn $header[$i];
 			if(defined $cellLinesToConsider->{$header[$i]}){
+				# warn "found it!";
 				push(@indicesToConsider, $i);
 				$coltData{'colt'}->{'cellLinesToConsider'}->{$header[$i]}=1;
 			}
-			else{$coltData{'colt'}->{'cellLinesNotConsidered'}->{$header[$i]}=1};
+			else{$coltData{'colt'}->{'cellLinesNotConsidered'}->{$header[$i]}=1; }
 		}
 	}
 	
@@ -255,6 +260,33 @@ sub loadColtData{
 	return \%coltData;
 }
 
+# load_GEO_data
+# input: cellLinesToConsider == a hash reference that contains the cell lines we are interested in as keys
+# 			 datasetsToAnalyze == an array reference containing the filenames of the datasets we are considering. Most of thie time the size of this array will be 1
+# Processes GEO gene expression data (e.g. GSE12777) -- this subroutine is similar to load_CCLE_data
+# data returned:
+# {datasetName}->{'genes'}->{geneName}->{cellLine} = score
+# {datasetName}->{'cellLinesToConsider'} = array of desired cell lines actually considered
+# {datasetName}->{'desiredCellLinesNotConsidered'} = array of desired cell lines not considered (e.g. those in cellLinesToConsider that are not in a dataset)
+# {datasetName}->{'cellLinesNotConsidered'} = array of other cell lines not considered (i.e. those in the dataset that are not in cellLinesToConsider)
+# only pull data for cell lines in the $cellLinesToConsider array ref, if $cellLinesToConsidered is undef, consider everything
+sub load_GEO_data {
+	my ($cellLinesToConsider, $datasetsToAnalyze) = @_;
+	# will load all files in the current directory preceding with 'RMA'
+	# if an argument is specified it will search in the argument directory instead of the current dir
+	if(!$datasetsToAnalyze){die "no GEO datasets to analyze";}
+	
+	my (%scores);
+	foreach my $dataset(@{$datasetsToAnalyze}){
+		open (my $datasetFile, "<$dataset") || die "in load_GEO_data → Couldn't open '$dataset' $!\n";	
+		$/ = &UtilityFunctions::line_break_check( $datasetFile );
+		&processGEOFile($dataset, $datasetFile, \%scores, $cellLinesToConsider);
+	}
+	return \%scores;
+} 
+
+# load_CCLE_data
+# processes CCLE expression datafile
 # data returned:
 # {datasetName}->{'genes'}->{geneName}->{cellLine} = score
 # {datasetName}->{'cellLinesToConsider'} = array of desired cell lines actually considered
@@ -289,8 +321,8 @@ sub load_CCLE_data {
 sub loadCCLE_CellLines{
 	my ($dir,$fileName) = @_;
 	$dir = '.' if ! defined $dir; # use current dir if $dir is not defined.
-	$fileName = 'all_ccle_Cell_Line_Annotations.txt' if ! defined $fileName;
-	open(my $cellLines, "<$dir/$fileName") || die "Could not open '$dir/$fileName'$!\n";
+	$fileName = 'source_data/CELL_LINE_annotations/all_ccle_Cell_Line_Annotations.txt' if ! defined $fileName;
+	open(my $cellLines, "<$fileName") || die "Could not open '$fileName'$!\n";
 	$/ = &UtilityFunctions::line_break_check(\*$cellLines);
 	my $header = <$cellLines>;
 	my %cellLines;
@@ -322,6 +354,98 @@ sub getCCLE_Datasets {
 		$files[$i] = $dir."/$files[$i]";
 	}
 	return \@files;
+}
+
+# processGEOFile
+# inputs -- dataset = filename currently being processed
+# 					datasetfile = file handle 
+# 					$scores == hash reference that handles will store all the expression values
+# 					$cellLinesToConsider == hash reference to look up the cell lines too consider data from
+# function:
+# 	process a tab delimited geo file that contains cell lines on the first line and expression values for the indicated probe on subsequent rows 
+# 	(probe id = index 0 and each subsequent index is a score).
+sub processGEOFile{
+	my ($dataset, $datasetFile, $scores, $cellLinesToConsider) = @_;
+	# for this type of file the first line is cell lines
+	my $cellLineNames = '#';
+	my $lineNum=0;
+	# check for and skip over comment rows - there shouldn't be any, but just in case...
+	while($cellLineNames =~ /^\#/){
+		$cellLineNames = <$datasetFile>;
+		$cellLineNames = &UtilityFunctions::trimErroneousCharactersAtEnds($cellLineNames);
+		$lineNum++;
+	}
+	$cellLineNames = uc($cellLineNames);
+	my @cellLineNames = split(/\t/, $cellLineNames);
+	# first index of cellLineNames should be blank since this column of the file should contain probe ids (i.e. not scores)
+	if($cellLineNames[0] && $cellLineNames[0] ne ''){	unshift(@cellLineNames, '');	}
+
+	my %cellLinesNotConsidered = ();
+	my %cellLineCancerTypes = ();
+	my @columnsToConsider;
+	
+	my $considerAllCellLines = 0;
+	if(!defined $cellLinesToConsider){	$considerAllCellLines=1;}
+
+	HEAD:for (my $i = 1; $i < @cellLineNames; $i++) {
+		# skip blanks...
+		if(! defined $cellLineNames[$i]){next HEAD;}
+		$cellLineNames[$i] = &normalizeCellLineName($cellLineNames[$i]);
+
+		if($considerAllCellLines){
+			$cellLinesToConsider->{$cellLineNames[$i]} = 1;
+			push(@columnsToConsider,$i);	
+			$cellLineCancerTypes{$cellLineNames[$i]}->{'all'}=1;
+		}
+		#  only consider those in hash
+		else{
+			if(!defined $cellLinesToConsider->{$cellLineNames[$i]}){
+				$cellLinesNotConsidered{$cellLineNames[$i]}=1;
+			}
+			else{	
+				push(@columnsToConsider,$i);
+				$cellLineCancerTypes{$cellLineNames[$i]}->{'all'}=1;
+			}
+		}
+	}
+	my $probeTranslations = &loadProbeTranslations('source_data/GEO_data/hgu133plus2_probeToGene.txt');
+	foreach my $probeScores(<$datasetFile>){
+		$lineNum++;
+		chomp($probeScores);
+		$probeScores =~ s/"//g; # remove quotes
+		$probeScores=uc($probeScores);
+		my @data = split(/[\t|\s]/, $probeScores);
+		my $gene = $probeTranslations->{$data[0]};
+		foreach my $i(@columnsToConsider) {
+			$scores->{$dataset}->{'genes'}->{$gene}->{$cellLineNames[$i]} = $data[$i];
+		}
+	}	
+	$scores->{$dataset}->{'cellLinesToConsider'} = \%cellLineCancerTypes;
+	$scores->{$dataset}->{'cellLinesNotConsidered'} = \%cellLinesNotConsidered;
+	close $datasetFile;
+	return 1;
+}
+
+# loadProbeTranslations
+# simple subroutine that processes a probe to gene translation file and returns the results as a hash ref
+# the file it processes should be a simple tab or space delimited file in which the 1st column contains a probeID and the 2nd
+# contains the corresponding gene name.
+# input: fileName
+# returns: hash ref
+sub loadProbeTranslations{
+	my $fileName = shift;
+	die "no probe translation fileName defined!" if (!defined $fileName);
+	open (my $handle, "<$fileName") || die "in load_CCLE_data → Couldn't open '$fileName' $!\n";	
+	$/ = &UtilityFunctions::line_break_check( $handle );
+	my %probeLookup = ();
+	foreach my $probeTranslation(<$handle>){
+		chomp($probeTranslation);
+		$probeTranslation =~ s/"//g; # remove quotes
+		$probeTranslation=uc($probeTranslation);
+		my @data = split(/[\t|\s]/, $probeTranslation);
+		$probeLookup{$data[0]}=$data[1];
+	}
+	return \%probeLookup;
 }
 
 sub processResFile {
@@ -405,7 +529,7 @@ sub processResFile {
 		my $restOfName = $header[$i];
 		$restOfName =~ s/^$temp[0]_//;
 		if(!defined $ccleCellLines->{'siteTypes'}->{$restOfName}){
-			warn "Combo found! → '$restOfName'";
+			# warn "Combo found! → '$restOfName'";
 			# this is likely 2 cell lines smushed together
 			my $foundIt = 0;
 			foreach my $label(@allowedCellLineLabels){
